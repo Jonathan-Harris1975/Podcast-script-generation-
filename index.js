@@ -1,37 +1,80 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import OpenAI from 'openai';
 import bodyParser from 'body-parser';
 import fetchFeedSummaries from './fetchFeed.js';
+import rateLimit from 'express-rate-limit';
 
 const app = express();
+
+// Middleware
 app.use(cors());
 app.use(bodyParser.json());
+app.use(express.urlencoded({ extended: true }));
 
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
+
+// Initialize OpenAI
 const openai = new OpenAI({
-  apiKey: process.env?.OPENAI_API_KEY || '',
+  apiKey: process.env.OPENAI_API_KEY || '',
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
+// Main generation endpoint
 app.post('/generate', async (req, res) => {
   try {
     const { rssFeedUrl, prompt, temperature, maxItems = 20, maxAgeDays = 7 } = req.body;
+    
+    // Input validation
+    if (!rssFeedUrl) {
+      return res.status(400).json({ error: 'Missing required parameter: rssFeedUrl' });
+    }
+    if (!prompt) {
+      return res.status(400).json({ error: 'Missing required parameter: prompt' });
+    }
 
+    // Fetch and process feed
     const feedSummaries = await fetchFeedSummaries(rssFeedUrl, maxItems, maxAgeDays);
     const inputText = feedSummaries.join('\n');
 
+    // Generate completion
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
-      messages: [{ role: 'user', content: `${prompt}\n${inputText}` }],
+      model: process.env.MODEL || 'gpt-4-1106-preview',
+      messages: [{ 
+        role: 'user', 
+        content: `${prompt}\n${inputText}` 
+      }],
       temperature: temperature || 0.75,
     });
 
     const output = completion.choices[0].message.content;
     res.json({ chunks: [output] });
+    
   } catch (err) {
     console.error('Generation failed:', err);
-    res.status(500).send({ error: err.message || 'Unknown error' });
+    const statusCode = err.response?.status || 500;
+    res.status(statusCode).json({ 
+      error: err.message || 'Unknown error',
+      ...(err.response?.data && { details: err.response.data })
+    });
   }
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Using model: ${process.env.MODEL || 'gpt-4-1106-preview'}`);
+});
