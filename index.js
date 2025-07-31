@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import bodyParser from 'body-parser';
 import fetchFeedSummaries from './fetchFeed.js';
 import rateLimit from 'express-rate-limit';
-
+console.log('Import paths resolved successfully');
 const app = express();
 
 // Middleware
