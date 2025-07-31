@@ -1,19 +1,13 @@
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
 import bodyParser from 'body-parser';
-import fetchFeedSummaries from './fetchFeed.js';
+import { fetchFeedSummaries } from './fetchFeed.js';
 import rateLimit from 'express-rate-limit';
-console.log('Import paths resolved successfully');
-const app = express();
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
+import 'dotenv/config';
 
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-});
+const app = express();
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -21,8 +15,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -34,7 +28,46 @@ const openai = new OpenAI({
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'Server is running' });
+});
+
+// Main generation endpoint
+app.post('/generate', async (req, res) => {
+  try {
+    const { rssFeedUrl, prompt, temperature, maxItems = 20, maxAgeDays = 7 } = req.body;
+    
+    if (!rssFeedUrl) return res.status(400).json({ error: 'Missing rssFeedUrl' });
+    if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+
+    const feedSummaries = await fetchFeedSummaries(rssFeedUrl, maxItems, maxAgeDays);
+    const inputText = feedSummaries.join('\n');
+
+    const completion = await openai.chat.completions.create({
+      model: process.env.MODEL || 'gpt-4-1106-preview',
+      messages: [{ 
+        role: 'user', 
+        content: `${prompt}\n${inputText}` 
+      }],
+      temperature: temperature || 0.75,
+    });
+
+    res.json({ chunks: [completion.choices[0].message.content] });
+  } catch (err) {
+    console.error('Error:', err);
+    res.status(500).json({ 
+      error: err.message || 'Server error',
+      ...(err.response?.data && { details: err.response.data })
+    });
+  }
+});
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`OpenAI Model: ${process.env.MODEL || 'default'}`);
+});app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
