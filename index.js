@@ -27,47 +27,12 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
 
-// Health check endpoint
+// Health check endpoints
 app.get('/', (req, res) => {
   res.status(200).json({ status: 'Server is running' });
 });
 
-// Main generation endpoint
-app.post('/generate', async (req, res) => {
-  try {
-    const { rssFeedUrl, prompt, temperature, maxItems = 20, maxAgeDays = 7 } = req.body;
-    
-    if (!rssFeedUrl) return res.status(400).json({ error: 'Missing rssFeedUrl' });
-    if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
-
-    const feedSummaries = await fetchFeedSummaries(rssFeedUrl, maxItems, maxAgeDays);
-    const inputText = feedSummaries.join('\n');
-
-    const completion = await openai.chat.completions.create({
-      model: process.env.MODEL || 'gpt-4-1106-preview',
-      messages: [{ 
-        role: 'user', 
-        content: `${prompt}\n${inputText}` 
-      }],
-      temperature: temperature || 0.75,
-    });
-
-    res.json({ chunks: [completion.choices[0].message.content] });
-  } catch (err) {
-    console.error('Error:', err);
-    res.status(500).json({ 
-      error: err.message || 'Server error',
-      ...(err.response?.data && { details: err.response.data })
-    });
-  }
-});
-
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`OpenAI Model: ${process.env.MODEL || 'default'}`);
-});app.get('/health', (req, res) => {
+app.get('/health', (req, res) => {
   res.status(200).json({ status: 'healthy' });
 });
 
