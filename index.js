@@ -78,7 +78,16 @@ app.post('/generate', async (req, res) => {
     });
   }
 });
-
+app.get('/env-check', (req, res) => {
+  const keys = Object.keys(process.env);
+  const visibleEnv = keys.reduce((acc, key) => {
+    if (key.includes('OPENAI') || key.includes('RENDER')) {
+      acc[key] = process.env[key];
+    }
+    return acc;
+  }, {});
+  res.json(visibleEnv);
+});
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
