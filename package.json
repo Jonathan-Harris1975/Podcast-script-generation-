@@ -13,9 +13,10 @@
     "cors": "^2.8.5",
     "openai": "^4.26.0",
     "body-parser": "^1.20.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express-rate-limit": "^6.8.1"
   },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
