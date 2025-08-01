@@ -51,6 +51,96 @@ function normaliseToSingle(input) {
  * Required: intro, main (or mainChunks), outro
  * Optional: name (Google TTS voice name, default en-GB-Wavenet-B)
  *
+ * Responds with:
+ *  - ssml: merged speak string (for logs)
+ *  - tts:  classic TTS payload
+ *  - "TTS output complete": identical to `tts` (map this in Make)
+ */
+router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
+  try {
+    let payload = {};
+    if (req.is('application/json') && typeof req.body === 'object') {
+      payload = req.body;
+    } else if (typeof req.body === 'string' && req.body.trim()) {
+      try { payload = JSON.parse(req.body); } catch { /* leave empty */ }
+    }
+    if (!Object.keys(payload).length) payload = { ...req.query };
+
+    const intro = payload.intro;
+    const mainInput = payload.main ?? payload.mainChunks;
+    const outro = payload.outro;
+    const voiceName = payload.name || 'en-GB-Wavenet-B';
+
+    if (!intro || !mainInput || !outro) {
+      return res.status(400).json({
+        error: 'Provide intro, main (or mainChunks), and outro. Optional: name (voice).'
+      });
+    }
+
+    const merged = [
+      unwrap(normaliseToSingle(intro)),
+      '<break time="700ms"/>',
+      unwrap(normaliseToSingle(mainInput)),
+      '<break time="700ms"/>',
+      unwrap(normaliseToSingle(outro))
+    ].join(' ');
+
+    const ssml = ensureSpeak(merged);
+
+    const ttsPayload = {
+      input: { ssml },
+      voice: {
+        languageCode: 'en-GB',
+        name: voiceName,
+        ssmlGender: 'MALE'
+      },
+      audioConfig: { audioEncoding: 'MP3' }
+    };
+
+    // Return both, but the one you map is "TTS output complete"
+    return res.json({
+      ssml,
+      tts: ttsPayload,
+      "TTS output complete": ttsPayload
+    });
+  } catch (err) {
+    console.error('Compose failed:', err);
+    return res.status(500).json({ error: 'Compose error', details: err.message });
+  }
+});
+
+/* Optional: debug endpoint */
+router.post('/debug', express.text({ type: '*/*' }), (req, res) => {
+  let body = {};
+  try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; } catch { body = {}; }
+  const t = x => Array.isArray(x) ? 'array' : typeof x;
+  res.json({
+    rawType: typeof req.body,
+    introType: t(body?.intro ?? req.query?.intro),
+    mainType: t(body?.main ?? req.query?.main),
+    mainChunksType: t(body?.mainChunks ?? req.query?.mainChunks),
+    outroType: t(body?.outro ?? req.query?.outro),
+    name: (body?.name ?? req.query?.name) || '(default en-GB-Wavenet-B)'
+  });
+});
+
+module.exports = router;  if (typeof v === 'object' && v && Array.isArray(v.chunks)) {
+    return normaliseToSingle(v.chunks);
+  }
+
+  if (typeof v === 'string') {
+    return ensureSpeak(v);
+  }
+
+  return '';
+}
+
+/**
+ * POST /compose
+ * Accepts JSON or stringified JSON body, or query params.
+ * Required: intro, main (or mainChunks), outro
+ * Optional: name (Google TTS voice name, default en-GB-Wavenet-B)
+ *
  * Responds:
  * {
  *   ssml: "<speak>...</speak>",
