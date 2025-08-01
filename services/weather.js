@@ -2,6 +2,10 @@ async function getWeatherSummary(dateStr) {
   const host = process.env.RAPIDAPI_HOST; // e.g. weatherapi-com.p.rapidapi.com
   const key  = process.env.RAPIDAPI_KEY;
 
+  if (!host || !key) {
+    throw new Error('Missing RAPIDAPI_HOST or RAPIDAPI_KEY');
+  }
+
   const url = `https://${host}/history.json?q=UK&dt=${dateStr}`;
   const res = await fetch(url, {
     method: 'GET',
