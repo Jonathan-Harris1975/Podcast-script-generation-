@@ -17,7 +17,7 @@ async function getWeatherSummary(dateStr) {
   }
 
   const data = await res.json();
-  const day = data?.forecast?.forecastday?.[0]?.day;
+  const day = data && data.forecast && data.forecast.forecastday && data.forecast.forecastday[0] && data.forecast.forecastday[0].day;
   if (!day) throw new Error('Weather response missing day data');
 
   return `Max temp was ${day.maxtemp_c}°C, min was ${day.mintemp_c}°C, with ${day.condition.text.toLowerCase()}.`;
