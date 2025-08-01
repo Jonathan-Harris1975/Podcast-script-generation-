@@ -1,33 +1,31 @@
+// routes/compose.js
 const express = require('express');
 const router = express.Router();
 
-// Helpers
+/* ---------- helpers ---------- */
 const oneLine = s => String(s || '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 const ensureSpeak = s => {
   const t = oneLine(s);
-  return /^<speak>.*<\/speak>$/.test(t) ? t : `<speak>${t}</speak>`;
+  return /^<speak>[\s\S]*<\/speak>$/.test(t) ? t : `<speak>${t}</speak>`;
 };
 const unwrap = s => oneLine(s).replace(/^<speak>/, '').replace(/<\/speak>$/, '');
 
-// Try to coerce unknown input into a JS value (string or array)
 function coerce(val) {
   if (val == null) return '';
   if (Array.isArray(val)) return val;
   if (typeof val === 'string') {
-    const trimmed = val.trim();
-    // If it looks like JSON, try parse
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try { return JSON.parse(trimmed); } catch { /* fall through */ }
+    const t = val.trim();
+    if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+      try { return JSON.parse(t); } catch { /* fall through */ }
     }
     return val;
   }
   return val;
 }
 
-// Normalise to a single SSML block
 function normaliseToSingle(input) {
   const v = coerce(input);
+
   if (Array.isArray(v)) {
     const bodies = v
       .map(x => typeof x === 'string' ? x : String(x))
@@ -35,6 +33,103 @@ function normaliseToSingle(input) {
       .filter(Boolean);
     return ensureSpeak(bodies.join(' <break time="700ms"/> '));
   }
+
+  if (typeof v === 'object' && v && Array.isArray(v.chunks)) {
+    return normaliseToSingle(v.chunks);
+  }
+
+  if (typeof v === 'string') {
+    return ensureSpeak(v);
+  }
+
+  return '';
+}
+
+/* ---------- route ---------- */
+/**
+ * POST /compose
+ * Accepts body as JSON or stringified JSON, or via query params.
+ * Fields:
+ *   intro: string
+ *   main:  string OR object {chunks: []}
+ *   mainChunks: array OR stringified array
+ *   outro: string
+ *   name: optional Google TTS voice name (default en-GB-Wavenet-B)
+ *
+ * Responds:
+ *  { ssml: "<speak>...</speak>",
+ *    tts: {
+ *      input: { ssml: "<speak>...</speak>" },
+ *      voice: { languageCode: "en-GB", name, ssmlGender: "MALE" },
+ *      audioConfig: { audioEncoding: "MP3" }
+ *    }
+ *  }
+ */
+router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
+  try {
+    let payload = {};
+    if (req.is('application/json') && typeof req.body === 'object') {
+      payload = req.body;
+    } else if (typeof req.body === 'string' && req.body.trim()) {
+      try { payload = JSON.parse(req.body); } catch { /* not JSON, ignore */ }
+    }
+    if (!Object.keys(payload).length) payload = { ...req.query };
+
+    const intro = payload.intro;
+    const mainInput = payload.main ?? payload.mainChunks;
+    const outro = payload.outro;
+    const voiceName = payload.name || 'en-GB-Wavenet-B';
+
+    if (!intro || !mainInput || !outro) {
+      return res.status(400).json({
+        error: 'Provide intro, main (or mainChunks), and outro. Optional: name (voice).'
+      });
+    }
+
+    const mergedBody = [
+      unwrap(normaliseToSingle(intro)),
+      '<break time="700ms"/>',
+      unwrap(normaliseToSingle(mainInput)),
+      '<break time="700ms"/>',
+      unwrap(normaliseToSingle(outro))
+    ].join(' ');
+
+    const ssml = ensureSpeak(mergedBody);
+
+    return res.json({
+      ssml,
+      tts: {
+        input: { ssml },
+        voice: {
+          languageCode: 'en-GB',
+          name: voiceName,
+          ssmlGender: 'MALE'
+        },
+        audioConfig: { audioEncoding: 'MP3' }
+      }
+    });
+  } catch (err) {
+    console.error('Compose failed:', err);
+    return res.status(500).json({ error: 'Compose error', details: err.message });
+  }
+});
+
+/* Optional: debug endpoint to see received types */
+router.post('/debug', express.text({ type: '*/*' }), (req, res) => {
+  let body = {};
+  try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; } catch { body = {}; }
+  const t = x => Array.isArray(x) ? 'array' : typeof x;
+  res.json({
+    rawType: typeof req.body,
+    introType: t(body?.intro ?? req.query?.intro),
+    mainType: t(body?.main ?? req.query?.main),
+    mainChunksType: t(body?.mainChunks ?? req.query?.mainChunks),
+    outroType: t(body?.outro ?? req.query?.outro),
+    name: (body?.name ?? req.query?.name) || '(default en-GB-Wavenet-B)'
+  });
+});
+
+module.exports = router;  }
   if (typeof v === 'object' && v && Array.isArray(v.chunks)) {
     return normaliseToSingle(v.chunks);
   }
