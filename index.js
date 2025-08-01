@@ -1,8 +1,12 @@
 const express = require('express');
 const app = express();
+
 const outroRoute = require('./routes/outro');
+const introRoute = require('./routes/intro');
 
 app.use(express.json());
 app.use('/outro', outroRoute);
+app.use('/intro', introRoute);
 
-app.listen(3000, () => console.log('Server running on port 3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
