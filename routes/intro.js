@@ -1,40 +1,47 @@
-import express from 'express';
-import fs from 'fs';
-import { getWeatherSummary } from '../services/weather.js';
-import { OpenAI } from 'openai';
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const { openai } = require('../services/openai');
+const { getWeatherSummary } = require('../services/weather');
 
 const router = express.Router();
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const getRandomQuote = () => {
-  const quotes = fs.readFileSync('./quotes.txt', 'utf-8').split('\n').filter(Boolean);
+function getRandomQuote() {
+  const p = path.join(__dirname, '..', 'quotes.txt');
+  const quotes = fs.readFileSync(p, 'utf-8').split('\n').filter(Boolean);
   return quotes[Math.floor(Math.random() * quotes.length)];
-};
+}
 
-router.post('/generate-intro', async (req, res) => {
+// POST /intro
+router.post('/', async (req, res) => {
   try {
-    const date = req.body.date || new Date().toISOString().split('T')[0];
+    const date = req.body?.date || new Date().toISOString().split('T')[0];
     const weatherSummary = await getWeatherSummary(date);
     const quote = getRandomQuote();
 
-    const userPrompt = req.body.prompt || "";
-    const safePrompt = userPrompt
-      .replace(/{{weather_summary}}/g, weatherSummary)
-      .replace(/{{quote}}/g, quote);
+    // Minimal prompt can be supplied from Make.com; we append SSML rules.
+    const userPrompt = req.body?.prompt || 
+      `Write a short, confident podcast intro for "Turing's Torch: AI Weekly". Include a witty nod to UK weather: "${weatherSummary}". Weave in this Alan Turing quote: "${quote}". Keep pacing brisk and charismatic.`;
 
-    const systemPrompt = `
-You are an API voice assistant that generates SSML podcast intros.
-Strict rules: Never return markdown, JSON, or commentary.
-Only return a raw <speak>...</speak> SSML string with no line breaks or formatting.
-Output must be under 1800 characters, valid SSML, and ready for TTS.
-`.trim();
+    const ssmlRules = ` Use SSML. Wrap output with <speak>...</speak>. Say "AI" as <say-as interpret-as="characters">A I</say-as>. Include natural <emphasis> and <break> tags. Output must be JSON-safe, a single line (no raw newlines), and under 700 characters.`;
 
-    const response = await openai.chat.completions.create({
-      model: process.env.MODEL || 'gpt-4',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: safePrompt }
-      ],
+    const finalPrompt = userPrompt + ssmlRules;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [{ role: 'user', content: finalPrompt }],
+      temperature: 0.7
+    });
+
+    const ssml = completion.choices[0].message.content.trim();
+    res.json({ ssml });
+  } catch (err) {
+    console.error('Intro generation failed:', err);
+    res.status(500).json({ error: 'Failed to generate intro', details: err.message });
+  }
+});
+
+module.exports = router;      ],
       temperature: 0.7
     });
 
