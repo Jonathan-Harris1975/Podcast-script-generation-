@@ -14,6 +14,7 @@ async function fetchRssItems(url) {
   const parser = new XMLParser({ ignoreAttributes: false, trimValues: true });
   const data = parser.parse(xml);
   const channel = data?.rss?.channel || data?.feed;
+
   let items = [];
   if (channel?.item) items = Array.isArray(channel.item) ? channel.item : [channel.item];
   else if (channel?.entry) items = Array.isArray(channel.entry) ? channel.entry : [channel.entry];
@@ -45,7 +46,7 @@ function ensureSpeak(ssml) {
 function extractSpeakChunks(raw) {
   if (!raw) return [];
 
-  // 1) JSON forms
+  // 1) Try JSON (array or object with chunks/ssml)
   if (/^\s*[\[{]/.test(raw)) {
     try {
       const parsed = JSON.parse(raw);
@@ -53,6 +54,7 @@ function extractSpeakChunks(raw) {
       if (parsed && Array.isArray(parsed.chunks)) return parsed.chunks.map(String);
       if (parsed && typeof parsed.ssml === 'string') return [parsed.ssml];
     } catch {
+      // maybe stringified with escapes
       try {
         const unescaped = raw.replace(/\\"/g, '"');
         const parsed2 = JSON.parse(unescaped);
@@ -63,11 +65,11 @@ function extractSpeakChunks(raw) {
     }
   }
 
-  // 2) Regex capture
+  // 2) Pull <speak> blocks
   const matches = raw.match(/<speak>[\s\S]*?<\/speak>/g);
   if (matches && matches.length) return matches;
 
-  // 3) Minimal cleanup fallback
+  // 3) Fallback: de-array-ify then split lines
   const cleaned = raw
     .replace(/^\s*\[\s*/, '')
     .replace(/\s*\]\s*$/, '')
@@ -81,7 +83,7 @@ function extractSpeakChunks(raw) {
 // ---------- POST /main (generate chunks) ----------
 router.post('/', async (req, res) => {
   try {
-    const { rssFeedUrl, maxItems, maxAgeDays, prompt, temperature } = req.body || {};
+    const { rssFeedUrl, maxItems, maxAgeDays, prompt, temperature, return: returnMode } = req.body || {};
     let stories = [];
 
     // Case 1: RSS
@@ -138,10 +140,18 @@ router.post('/', async (req, res) => {
 
     const raw = (completion.choices?.[0]?.message?.content || '').trim();
 
+    // Robust extraction & normalisation
     const extracted = extractSpeakChunks(raw)
       .map(oneLine)
       .map(ensureSpeak)
       .filter(Boolean);
+
+    // Optional: return merged block instead of array
+    if (returnMode === 'merged') {
+      const bodies = extracted.map(c => c.replace(/^<speak>/, '').replace(/<\/speak>$/, ''));
+      const merged = `<speak>${bodies.join(' <break time="700ms"/> ')}</speak>`;
+      return res.json({ ssml: merged });
+    }
 
     return res.json({ chunks: extracted });
   } catch (err) {
