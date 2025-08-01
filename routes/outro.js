@@ -9,13 +9,12 @@ router.post('/', async (req, res) => {
     const booksPath = path.join(__dirname, '../data/books.json');
     const books = JSON.parse(fs.readFileSync(booksPath, 'utf-8'));
 
-    // Random sponsor each call
     const book = books[Math.floor(Math.random() * books.length)];
-    const userPrompt = req.body?.prompt || 
-      `Write a confident, witty podcast outro promoting {{book_title}} ({{book_url}}) in a British Gen X tone. Mention that new episodes drop every Friday and nudge listeners to jonathan-harris.online for the newsletter and more ebooks.`;
+    const userPrompt = (req.body && req.body.prompt)
+      ? req.body.prompt
+      : 'Write a confident, witty podcast outro promoting {{book_title}} ({{book_url}}) in a British Gen X tone. Mention that new episodes drop every Friday and nudge listeners to jonathan-harris.online for the newsletter and more ebooks.';
 
-    // Only hardcode SSML formatting rules
-    const ssmlInstructions = ` Use SSML with <say-as interpret-as="characters">A I</say-as>, <emphasis>, and <break> tags. Wrap with <speak>...</speak>. JSON-safe, single line (no raw newlines), under 600 characters.`;
+    const ssmlInstructions = ' Use SSML with <say-as interpret-as="characters">A I</say-as>, <emphasis>, and <break> tags. Wrap with <speak>...</speak>. JSON-safe, single line (no raw newlines), under 600 characters.';
 
     const finalPrompt = userPrompt
       .replace('{{book_title}}', book.title)
@@ -23,7 +22,7 @@ router.post('/', async (req, res) => {
       + ssmlInstructions;
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4',
+      model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: finalPrompt }],
       temperature: 0.8
     });
@@ -36,5 +35,4 @@ router.post('/', async (req, res) => {
   }
 });
 
-module.exports = router;
 module.exports = router;
