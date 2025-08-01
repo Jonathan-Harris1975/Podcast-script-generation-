@@ -5,6 +5,11 @@ const outroRoute = require('./routes/outro');
 const introRoute = require('./routes/intro');
 
 app.use(express.json());
+
+// simple health checks
+app.get('/', (_req, res) => res.json({ ok: true, service: 'ssml-podcast-api' }));
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 app.use('/outro', outroRoute);
 app.use('/intro', introRoute);
 
