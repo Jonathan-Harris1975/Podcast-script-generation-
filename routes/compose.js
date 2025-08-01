@@ -16,7 +16,7 @@ function coerce(val) {
   if (typeof val === 'string') {
     const t = val.trim();
     if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
-      try { return JSON.parse(t); } catch { /* fall through */ }
+      try { return JSON.parse(t); } catch { /* ignore */ }
     }
     return val;
   }
@@ -45,25 +45,21 @@ function normaliseToSingle(input) {
   return '';
 }
 
-/* ---------- route ---------- */
 /**
  * POST /compose
- * Accepts body as JSON or stringified JSON, or via query params.
- * Fields:
- *   intro: string
- *   main:  string OR object {chunks: []}
- *   mainChunks: array OR stringified array
- *   outro: string
- *   name: optional Google TTS voice name (default en-GB-Wavenet-B)
+ * Accepts JSON or stringified JSON body, or query params.
+ * Required: intro, main (or mainChunks), outro
+ * Optional: name (Google TTS voice name, default en-GB-Wavenet-B)
  *
  * Responds:
- *  { ssml: "<speak>...</speak>",
- *    tts: {
- *      input: { ssml: "<speak>...</speak>" },
- *      voice: { languageCode: "en-GB", name, ssmlGender: "MALE" },
- *      audioConfig: { audioEncoding: "MP3" }
- *    }
- *  }
+ * {
+ *   ssml: "<speak>...</speak>",
+ *   tts: {
+ *     input: { ssml: "<speak>...</speak>" },
+ *     voice: { languageCode: "en-GB", name, ssmlGender: "MALE" },
+ *     audioConfig: { audioEncoding: "MP3" }
+ *   }
+ * }
  */
 router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
   try {
@@ -71,7 +67,7 @@ router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
     if (req.is('application/json') && typeof req.body === 'object') {
       payload = req.body;
     } else if (typeof req.body === 'string' && req.body.trim()) {
-      try { payload = JSON.parse(req.body); } catch { /* not JSON, ignore */ }
+      try { payload = JSON.parse(req.body); } catch { /* leave empty */ }
     }
     if (!Object.keys(payload).length) payload = { ...req.query };
 
@@ -86,7 +82,7 @@ router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
       });
     }
 
-    const mergedBody = [
+    const merged = [
       unwrap(normaliseToSingle(intro)),
       '<break time="700ms"/>',
       unwrap(normaliseToSingle(mainInput)),
@@ -94,7 +90,7 @@ router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
       unwrap(normaliseToSingle(outro))
     ].join(' ');
 
-    const ssml = ensureSpeak(mergedBody);
+    const ssml = ensureSpeak(merged);
 
     return res.json({
       ssml,
@@ -114,7 +110,7 @@ router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
   }
 });
 
-/* Optional: debug endpoint to see received types */
+/* Optional: debug endpoint */
 router.post('/debug', express.text({ type: '*/*' }), (req, res) => {
   let body = {};
   try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; } catch { body = {}; }
@@ -129,70 +125,7 @@ router.post('/debug', express.text({ type: '*/*' }), (req, res) => {
   });
 });
 
-module.exports = router;  }
-  if (typeof v === 'object' && v && Array.isArray(v.chunks)) {
-    return normaliseToSingle(v.chunks);
-  }
-  if (typeof v === 'string') {
-    return ensureSpeak(v);
-  }
-  return '';
-}
-
-/**
- * POST /compose
- * Accepts:
- *   JSON body, or a stringified JSON body, or query params.
- * Fields:
- *   - intro: string
- *   - main: string OR array (or object with {chunks:[]})
- *   - mainChunks: array OR stringified array
- *   - outro: string
- */
-router.post('/', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
-  try {
-    let payload = {};
-    // Prefer JSON already parsed by express.json(); otherwise try to parse text; else use query
-    if (req.is('application/json') && typeof req.body === 'object') {
-      payload = req.body;
-    } else if (typeof req.body === 'string' && req.body.trim()) {
-      try { payload = JSON.parse(req.body); } catch { /* not JSON, ignore */ }
-    }
-    if (!Object.keys(payload).length) {
-      payload = { ...req.query };
-    }
-
-    const intro = payload.intro;
-    const mainInput = payload.main ?? payload.mainChunks;
-    const outro = payload.outro;
-
-    if (!intro || !mainInput || !outro) {
-      return res.status(400).json({
-        error:
-          'Provide intro, main (or mainChunks), and outro. Body may be JSON, stringified JSON, or query params.'
-      });
-    }
-
-    const introOne = normaliseToSingle(intro);
-    const mainOne  = normaliseToSingle(mainInput);
-    const outroOne = normaliseToSingle(outro);
-
-    const mergedBody = [
-      unwrap(introOne),
-      '<break time="700ms"/>',
-      unwrap(mainOne),
-      '<break time="700ms"/>',
-      unwrap(outroOne)
-    ].join(' ');
-
-    return res.json({ ssml: ensureSpeak(mergedBody) });
-  } catch (err) {
-    console.error('Compose failed:', err);
-    return res.status(500).json({ error: 'Compose error', details: err.message });
-  }
-});
-
-// Optional: quick type checker for debugging
+module.exports = router;// Optional: quick type checker for debugging
 router.post('/debug', express.text({ type: '*/*' }), (req, res) => {
   const body = (req.is('application/json') && typeof req.body === 'object') ? req.body : (() => {
     try { return JSON.parse(req.body || '{}'); } catch { return {}; }
