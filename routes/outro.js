@@ -9,14 +9,15 @@ router.post('/', async (req, res) => {
     const booksPath = path.join(__dirname, '../data/books.json');
     const books = JSON.parse(fs.readFileSync(booksPath, 'utf-8'));
 
+    // Random sponsor each call
     const book = books[Math.floor(Math.random() * books.length)];
-    const userPrompt = req.body.prompt;
+    const userPrompt = req.body?.prompt || 
+      `Write a confident, witty podcast outro promoting {{book_title}} ({{book_url}}) in a British Gen X tone. Mention that new episodes drop every Friday and nudge listeners to jonathan-harris.online for the newsletter and more ebooks.`;
 
-    const fallbackPrompt = `Write a confident, witty podcast outro promoting {{book_title}} ({{book_url}}) in a British Gen X tone.`;
+    // Only hardcode SSML formatting rules
+    const ssmlInstructions = ` Use SSML with <say-as interpret-as="characters">A I</say-as>, <emphasis>, and <break> tags. Wrap with <speak>...</speak>. JSON-safe, single line (no raw newlines), under 600 characters.`;
 
-    const ssmlInstructions = ` Use SSML with <say-as interpret-as="characters">A I</say-as>, <emphasis>, and <break> tags. Output must be wrapped in <speak>...</speak>, JSON-safe, single-line, and under 600 characters.`;
-
-    const finalPrompt = (userPrompt || fallbackPrompt)
+    const finalPrompt = userPrompt
       .replace('{{book_title}}', book.title)
       .replace('{{book_url}}', book.url)
       + ssmlInstructions;
@@ -31,8 +32,9 @@ router.post('/', async (req, res) => {
     res.json({ ssml });
   } catch (err) {
     console.error('Outro generation failed:', err);
-    res.status(500).json({ error: 'Outro generation error' });
+    res.status(500).json({ error: 'Outro generation error', details: err.message });
   }
 });
 
+module.exports = router;
 module.exports = router;
