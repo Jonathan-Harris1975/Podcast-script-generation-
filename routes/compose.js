@@ -1,90 +1,113 @@
-// routes/compose.js
-const express = require('express');
+import express from "express";
+
 const router = express.Router();
 
-/* ---------- helpers ---------- */
-const oneLine = (s) => String(s ?? '').replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
-const stripSpeak = (s) => String(s ?? '').replace(/^<speak>/i, '').replace(/<\/speak>$/i, '');
-const ensureSpeak = (s) => {
-  const t = oneLine(s);
-  return /^<speak>[\s\S]*<\/speak>$/.test(t) ? t : `<speak>${t}</speak>`;
-};
+function val(v) { return v === undefined || v === null ? "" : String(v); }
 
-const normaliseToArray = (val) => {
-  if (val == null) return [];
-  if (Array.isArray(val)) return val;
-  if (typeof val === 'string') {
-    const maybe = val.trim();
-    if ((maybe.startsWith('[') && maybe.endsWith(']')) || (maybe.startsWith('{') && maybe.endsWith('}'))) {
-      try {
-        const parsed = JSON.parse(maybe);
-        return Array.isArray(parsed) ? parsed : [parsed];
-      } catch { /* ignore */ }
-    }
-    return [val];
+function stripSpeak(ssml) {
+  const s = val(ssml).trim();
+  return s.replace(/^<\s*speak[^>]*>/i, "").replace(/<\/\s*speak\s*>$/i, "").trim();
+}
+
+function normaliseToArray(input) {
+  if (Array.isArray(input)) return input.map(item => normaliseToArray(item)).flat();
+  if (typeof input === "object" && input && ("ssml" in input)) return [val(input.ssml)];
+  if (typeof input === "string") return [input];
+  if (input === undefined || input === null) return [];
+  return [String(input)];
+}
+
+function buildPlainFromSsml(ssml) {
+  return val(ssml)
+    .replace(/<break[^>]*>/gi, " ")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pick(src, keys) {
+  for (const k of keys) {
+    if (src && src[k] !== undefined) return src[k];
   }
-  return [val];
-};
+  return undefined;
+}
 
-const toPlain = (ssml) => stripSpeak(oneLine(ssml)).replace(/<break[^>]*>/g, ' ').trim();
+function parseBodyOrQuery(req) {
+  let src = {};
+  if (req.body && typeof req.body === "object") src = req.body;
+  else if (req.query && Object.keys(req.query).length) src = req.query;
+  else if (typeof req.body === "string") {
+    try { src = JSON.parse(req.body); } catch { src = { main: String(req.body) }; }
+  }
+  return src;
+}
 
-/* ---------- core ---------- */
-router.post('/ready-for-tts', (req, res) => {
+router.post("/ready-for-tts", async (req, res) => {
   try {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const src = parseBodyOrQuery(req);
+    const debugFlag = String((src["debug"] ?? "")).toLowerCase() === "true";
 
-    const intro = normaliseToArray(body.intro);
-    const main = normaliseToArray(body.main);
-    const mainChunks = normaliseToArray(body.mainChunks);
-    const outro = normaliseToArray(body.outro);
+    const introIn = src["intro"] ?? src["introSsml"];
+    const mainIn = src["main"] ?? src["mainSsml"];
+    const chunksIn = src["mainChunks"] ?? src["chunks"];
+    const outroIn = src["outro"] ?? src["outroSsml"];
+    const name = src["name"] ?? src["voice"] ?? src["voiceName"] ?? "en-GB-Wavenet-B";
+    const r2Prefix = src["r2Prefix"] ?? src["R2_PREFIX"] ?? "podcast";
 
-    const contentChunks = (mainChunks.length ? mainChunks : main).map(x => {
-      const s = typeof x === 'string' ? x : String(x ?? '');
-      return /^<speak>[\s\S]*<\/speak>$/.test(s) ? stripSpeak(s) : oneLine(s);
-    }).filter(Boolean);
+    const parts = [
+      ...normaliseToArray(introIn),
+      ...normaliseToArray(mainIn),
+      ...normaliseToArray(chunksIn),
+      ...normaliseToArray(outroIn),
+    ].map(stripSpeak).filter(Boolean);
 
-    const introStr = intro.map(x => /^<speak>[\s\S]*<\/speak>$/.test(String(x)) ? stripSpeak(String(x)) : oneLine(String(x))).join(' ');
-    const outroStr = outro.map(x => /^<speak>[\s\S]*<\/speak>$/.test(String(x)) ? stripSpeak(String(x)) : oneLine(String(x))).join(' ');
+    if (parts.length === 0) {
+      return res.status(400).json({
+        error: "No content after normalisation",
+        diagnostics: {
+          sourceKeysPresent: Object.keys(src || {}),
+          lengths: {
+            intro: val(introIn).length, main: val(mainIn).length,
+            chunks: Array.isArray(chunksIn) ? chunksIn.length : (chunksIn ? 1 : 0),
+            outro: val(outroIn).length
+          }
+        }
+      });
+    }
 
-    const spacer = '<break time="700ms"/>';
-    const sections = [];
-    if (introStr) sections.push(introStr);
-    if (contentChunks.length) sections.push(contentChunks.join(` ${spacer} `));
-    if (outroStr) sections.push(outroStr);
+    const joined = parts.join(' <break time="700ms"/>' + ' ');
+    const ssml = `<speak>${joined}</speak>`;
+    const plain = buildPlainFromSsml(ssml);
 
-    const mergedInner = sections.join(` ${spacer} `);
-    const ssml = ensureSpeak(mergedInner);
-    const plain = toPlain(ssml);
-
-    const voiceName = body.name || body.voiceName || 'en-GB-Wavenet-B';
-    const voice = body.voice || { languageCode: 'en-GB', name: voiceName };
-    const audioConfig = body.audioConfig || { audioEncoding: 'MP3', speakingRate: 1.0 };
-    const r2Prefix = body.r2Prefix || body.R2_PREFIX || 'podcast';
-
-    const response = {
-      transcript: { plain, ssml },
-      tts_maker: {
-        endpoint: '/tts/chunked',
-        body: { text: ssml, voice, audioConfig, R2_PREFIX: r2Prefix }
+    const payload = {
+      endpoint: "/tts/chunked",
+      body: {
+        text: ssml,
+        voice: { languageCode: "en-GB", name },
+        audioConfig: { audioEncoding: "MP3", speakingRate: 1.0 },
+        R2_PREFIX: r2Prefix
       }
     };
 
-    res.json(response);
+    const out = {
+      transcript: { plain, ssml },
+      tts_maker: payload
+    };
+
+    if (debugFlag) {
+      out.debug = {
+        source: (req.body && typeof req.body === "object") ? "body" :
+                (req.query && Object.keys(req.query).length ? "query" :
+                (typeof req.body === "string" ? "raw" : "unknown")),
+        partCount: parts.length,
+        lengths: parts.map(p => p.length)
+      };
+    }
+
+    res.json(out);
   } catch (e) {
-    res.status(400).json({ error: 'Invalid input', details: e?.message || String(e) });
+    res.status(500).json({ error: e?.message || String(e) });
   }
 });
 
-router.post('/ready-for-tts/debug', (req, res) => {
-  let body = {};
-  try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; } catch {}
-  const typeOf = (x) => Array.isArray(x) ? 'array' : typeof x;
-  res.json({
-    introType: typeOf(body?.intro),
-    mainType: typeOf(body?.main),
-    mainChunksType: typeOf(body?.mainChunks),
-    outroType: typeOf(body?.outro),
-  });
-});
-
-module.exports = router;
+export default router;
