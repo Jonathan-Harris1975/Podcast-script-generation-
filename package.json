@@ -1,14 +1,13 @@
 {
-  "name": "podcast-script-generation",
+  "name": "ssml-podcast-api",
   "version": "1.0.0",
-  "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5"
+    "openai": "^4.52.3",
+    "fast-xml-parser": "^4.4.0"
   }
 }
